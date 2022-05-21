@@ -1,2 +1,9 @@
 theme: jekyll-theme-hacker
 title: ooshou wiki
+
+# Navigation
+nav:
+  - name:           "home"
+    href:           "/"
+  - name:           "test"
+    href:           "/test"
