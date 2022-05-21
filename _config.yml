@@ -1,9 +1,7 @@
 theme: jekyll-theme-leap-day
-title: ooshou wiki
+title: ooshou lab
 
 # Navigation
 nav:
-  - name:           "home"
-    href:           "/"
   - name:           "test"
     href:           "/test"
