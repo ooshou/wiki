@@ -1,4 +1,6 @@
-# Your wiki name
+# ooshou lab
+
+[gimmick:themechooser](slate)
 
 [Home](home.md)
 [About](about.md)
