@@ -1,6 +1,6 @@
 # ooshou lab
 
-[gimmick:themechooser](slate)
+[gimmick:theme](slate)
 
 [Home](home.md)
 [About](about.md)
