@@ -1,0 +1,214 @@
+#!/bin/bash
+
+# ヘルプ
+function usage {
+# 英語
+#   cat <<EOM
+# Usage: $(basename "$0") [OPTION]...
+#   -c          Generate files required for overlay
+#   -d VALUE    Specify the directory where the file is to be generated
+#   -e          Execute overlay
+#   -n VALUE    Specifying the name of the dts file
+#   -h          Show help
+# EOM
+# 日本語
+  cat <<EOM
+Usage: $(basename "$0") [OPTION]...
+---- ファイル生成に使用するオプション
+  -c          オーバーレイに必要なdtsファイルの生成
+  -n VALUE    dtsファイルの名前の指定(ex. xapp.dtsを作成,実行したいときはVALUEにxappを指定)
+  -d VALUE    ファイル生成やオーバーレイ実行を行うディレクトリの指定
+  -e          オーバーレイの実行（無くても可能）  
+  -h          ヘルプの表示
+EOM
+  exit 0
+}
+
+# dts等の作成関数  
+function create_dts {
+  echo "/dts-v1/;/plugin/;
+/ {
+    fragment@0 {
+        target-path = \"/fpga-full\";
+        __overlay__ {
+            #address-cells = <2>;
+            #size-cells = <2>;
+            firmware-name = \"${2}.bit\";
+        };
+    };
+
+	fragment@1 {
+		target-path = \"/amba_pl@0\";
+        	#address-cells = <2>;
+        	#size-cells = <2>;		
+		__overlay__{
+            #address-cells = <2>;
+	        	#size-cells = <2>;
+			fclk0 {
+				compatible	= \"ikwzm,fclkcfg-0.10.a\";
+				clocks		= <&zynqmp_clk 0x47>;
+				insert-rate	= \"300000000\";
+				insert-enable	= <1>;
+				remove-rate	= \"1000000\";
+				remove-enable	= <0>;
+			};
+		};
+	};
+
+    fragment@2 {
+        target-path = \"/amba\";
+        
+        __overlay__ {
+            #address-cells = <2>;
+            #size-cells = <2>;
+
+            axi_dma_0 {
+                compatible = \"generic-uio\";
+                reg = <0x0 0xA0000000 0x0 0x10000>;
+            };
+            ${2}_0 {
+                compatible = \"generic-uio\";
+                reg = <0x0 0xA0010000 0x0 0x10000>;
+            };
+
+            udmabuf-in {
+                compatible  = \"ikwzm,udmabuf-0.10.a\";
+                device-name = \"udmabuf-in\";
+                size = <0x00200000>;
+            };
+
+            udmabuf-out {
+                compatible = \"ikwzm,udmabuf-0.10.a\";
+                device-name = \"udmabuf-out\";
+                size = <0x00010000>;
+            };
+        };
+    };
+} ;" > ${1}/${2}.dts
+
+echo "all:
+{
+	${2}.bit
+}" > ${1}/${2}.bif
+} 
+
+function exe {
+    pwd=$PWD
+    TARGET=$2
+    cd $1
+    FILE="/config/device-tree/overlays/"${TARGET}
+    # FILEが既にある場合
+    if [ -e $FILE ];then
+    echo "既にオーバーレイされています．以下のコマンドを実行します"
+    echo "sudo rmdir $FILE"
+    sudo rmdir $FILE
+    fi
+
+    # designXXX.bitを${TARGET}.bitにリネームしている
+    # もし，designXXX.bitのまましたい場合は${TARGET}.bifと23行目を変更する必要がある  
+
+    bootgen -image ${TARGET}.bif -arch zynqmp -process_bitstream bin -w 
+
+    dtc -I dts -O dtb -o ${TARGET}.dtb ${TARGET}.dts
+    sudo mkdir $FILE 
+    sudo cp ${TARGET}.dtb ${FILE}/dtbo
+
+    sudo cp ${TARGET}.bit.bin ${TARGET}.bit /lib/firmware
+
+    # 書き込みコマンドを実行しても，書き込みまでに時間がかかるため
+    # sleepで完全に書き込むだろうと思う時間待機
+    sleep 1
+
+    # 権限付与
+    sudo chmod 666 /dev/uio*
+    sudo chmod 666 /dev/udmabuf*
+
+    # いらないファイルの削除
+    rm ${TARGET}.bit.bin ${TARGET}.dtb
+
+    cd $pwd
+}
+
+function check_dtsfiles {
+    DIR=${PWD}/${1}
+    if [ ! -e $DIR/*.dts ]; then
+        echo "[ERROR] dts file does not exist in $DIR"
+        exit 2
+    fi
+    if [ ! -e $DIR/*.bif ]; then
+        echo "[ERROR] bif file does not exist in $DIR"
+        exit 2
+    fi
+        if [ ! -e $DIR/*.bit ]; then
+        echo "[ERROR] bit file does not exist in $DIR"
+        exit 2
+    fi
+}
+
+CREATE_FLAG=0
+EXE_FLAG=1
+FILENAME="sample"
+DIRNAME="./"
+# 各オプションに応じた実行内容を記述する
+while getopts ":cd:en:h" optKey; do
+    case "$optKey" in
+    c)
+        # オーバーレイに必要なファイルの作成
+        CREATE_FLAG=1
+        ;;
+    d)
+        # ディレクトリの指定  
+        DIRNAME=$OPTARG
+        ;;
+    e)
+        # オーバーレイの実行  
+        EXE_FLAG=1
+        ;;
+    n)
+        # オーバーレイファイルの名前指定  
+        FILENAME=$OPTARG
+        ;;
+    h )
+        # -h、--helpの場合、もしくは-a、-b以外の場合の実行内容
+        usage
+        ;;
+    :)
+        echo  "[ERROR] Option argument is undefined \"-$OPTARG\""
+        exit 2
+        ;;
+    ?)
+        echo "[ERROR] I did not create that -$OPTARG option"
+        echo "Please check the help"
+        exit 2
+        ;;
+    esac
+done
+
+set -eu
+
+# Create実行  
+if [ ${CREATE_FLAG} -ge 1 ];then 
+    mkdir -p $DIRNAME
+    create_dts $DIRNAME $FILENAME
+elif [ ${EXE_FLAG} -ge 1 ];then 
+    # オーバーレイ実行  
+    if [ ${FILENAME} = "sample" ];then 
+        if [ ! -d $DIRNAME ]; then
+            echo "[ERROR] Don't find ${DIRNAME}"
+            exit 2
+        fi
+        check_dtsfiles ${DIRNAME}
+        COUNT=`ls -al ${DIRNAME}/*.dts | wc -l` 
+        # dtsファイルが複数存在，もしくはない時  
+        if [ ${COUNT} -ne 1 ];then 
+            echo "[ERROR] Multiple files or no files"
+            echo "Please select in the -n options or create file"
+            exit 2
+        fi
+        FILENAME_TMP=`basename ${DIRNAME}/*.dts`
+        FILENAME=${FILENAME_TMP%.*}
+    fi
+    echo $DIRNAME
+    echo $FILENAME
+    exe $DIRNAME $FILENAME
+fi
